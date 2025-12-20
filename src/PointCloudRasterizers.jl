@@ -57,7 +57,6 @@ function index(ds::T, cellsizes; bbox=GeoInterface.extent(ds; fallback=false), c
 
     cols = Int(cld(bbox.X[2] - bbox.X[1], cellsizes[1]))
     rows = Int(cld(bbox.Y[2] - bbox.Y[1], cellsizes[2]))
-    nt = (min_x=bbox.X[1], min_y=bbox.Y[1], max_x=bbox.X[2], max_y=bbox.Y[2])
     ga = GeoArray(
         zeros(UInt16, cols, rows),  # max 65535 points per cell
         GeoArrays.AffineMap(
@@ -81,10 +80,9 @@ function index!(ds::T, counts::GeoArray{X}; rounding::RoundingMode=RoundNearest)
     indvec = zeros(Int, length(ds))
 
     linind = LinearIndices(counts)
-    cols, rows = size(counts)
 
     # @showprogress 5 "Building index..." 
-    for (i, p) in enumerate(GeoInterface.getgeom(ds))
+    for (i, p) in enumerate(GeoInterface.getpoint(ds))
         I = indices(counts, (GeoInterface.x(p), GeoInterface.y(p)), GeoArrays.Center(), rounding)
         checkbounds(Bool, counts, I) || continue
         @inbounds li = linind[I]
@@ -120,7 +118,7 @@ function Base.filter!(index::PointCloudIndex, condition=nothing)
             @inbounds ind = index.index[i]
             ind == 0 && continue  # filtered point
 
-            if ~condition(p)
+            if !condition(p)
                 @inbounds index.counts.A[ind] -= 1
                 @inbounds index.index[i] = 0
                 n += 1
@@ -153,7 +151,7 @@ function Base.filter!(index::PointCloudIndex, raster::GeoArray, condition=nothin
             ind == 0 && continue  # filtered point
             raster_value = raster[ind]
 
-            if ~condition(p, raster_value)
+            if !condition(p, raster_value)
                 @inbounds index.counts.A[ind] -= 1
                 @inbounds index.index[i] = 0
                 n += 1
@@ -172,18 +170,19 @@ Base.filter(index::PointCloudIndex, raster::GeoArray, condition=nothing) = filte
 Reduce the indexed pointcloud `index` to a raster with type `output_type`, using the `field` of the points to reduce with `reducer`.
 For example, one might reduce on `minimum` and `:z`, to get the lowest z (elevation) value of all points intersecting each raster cell.
 """
-function Base.reduce(index::PointCloudIndex; op::Function=GeoInterface.z, reducer=min, output_type::Val{T}=Val(Float64))::GeoArray{Union{Missing,T},2,Array{Union{Missing,T},2}} where {T}
-    reduce(index, op, reducer, T)
+function Base.reduce(index::PointCloudIndex; op::Function=GeoInterface.z, reducer=min, output_type::Val{T}=Val(Float64), stream=false)::GeoArray{Union{Missing,T},2,Array{Union{Missing,T},2}} where {T}
+    reduce(index, op, reducer, T, stream)
 end
 
-function Base.reduce(idx::PointCloudIndex, op::Function, reducer, output_type::Type{T})::GeoArray{Union{Missing,T},2,Array{Union{Missing,T},2}} where {T}
+function Base.reduce(idx::PointCloudIndex, op::Function, reducer, output_type::Type{T}, stream)::GeoArray{Union{Missing,T},2,Array{Union{Missing,T},2}} where {T}
 
     # Setup output grid
     count = counts(idx)
     output = similar(count, Union{Missing,T})::GeoArray{Union{Missing,T},2,Array{Union{Missing,T},2}}
+    fill!(output, missing)
 
     # If op.(index) fits in memory, we can use a more efficient method
-    fitsinmemory = Sys.free_memory() / sum(counts(idx)) * sizeof(T) > 5
+    fitsinmemory = (Sys.free_memory() / (sum(counts(idx)) * sizeof(T)) > 5) && !stream
     if fitsinmemory
         opv = Vector{T}(undef, sum(count))::Vector{T}
         order = invperm(sortperm(filter(>(0), index(idx))))
@@ -242,11 +241,10 @@ function Base.reduce(idx::PointCloudIndex, op::Function, reducer, output_type::T
     return output
 end
 
-function Base.reduce(index::PointCloudIndex, op::Function, reducer::Union{typeof(min),typeof(max)}, output_type::Type{T})::GeoArray{Union{Missing,T},2,Array{Union{Missing,T},2}} where {T}
+function Base.reduce(index::PointCloudIndex, op::Function, reducer::Union{typeof(min),typeof(max)}, output_type::Type{T}, stream::Bool)::GeoArray{Union{Missing,T},2,Array{Union{Missing,T},2}} where {T}
     # Setup output grid
     output = similar(index.counts, Union{Missing,T})::GeoArray{Union{Missing,T},2,Array{Union{Missing,T},2}}
     fill!(output, missing)
-
     @inbounds for (i, p) in enumerate(GeoInterface.getpoint(index.ds))
 
         # Gather facts
@@ -256,7 +254,6 @@ function Base.reduce(index::PointCloudIndex, op::Function, reducer::Union{typeof
     end
     return output
 end
-
 
 export
     index,
