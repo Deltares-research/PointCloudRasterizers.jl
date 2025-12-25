@@ -57,6 +57,19 @@ crs = EPSG(4326)
         @test count(!ismissing, raster.A) == 496546
         @test isapprox(mean(skipmissing(raster.A)), 861.5422515270361)
 
+        idx = index(pointcloud, cellsizes; crs=crs)
+        @time a = reduce(idx, reducer=minimum, output_type=Val(Float32))
+        @time a = reduce(idx, reducer=minimum, output_type=Val(Float32))
+        @inferred reduce(idx, reducer=minimum, output_type=Val(Float32))
+        @time b = reduce(idx, reducer=min, output_type=Val(Float32))
+        @time b = reduce(idx, reducer=min, output_type=Val(Float32))
+        @inferred reduce(idx, reducer=min, output_type=Val(Float32))
+        cmin = x -> minimum(x)
+        @time c = reduce(idx, reducer=cmin, output_type=Val(Float32), stream=true)
+        @time c = reduce(idx, reducer=cmin, output_type=Val(Float32), stream=true)
+        @inferred reduce(idx, reducer=cmin, output_type=Val(Float32))
+
+        @test sum(skipmissing(a)) == sum(skipmissing(b)) == sum(skipmissing(c))
     end
 
     @testset "FileIO" begin
